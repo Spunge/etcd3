@@ -124,15 +124,9 @@ export class Election {
       })
   }
 
-  public if_leading(): Promise<IKeyValue> {
+  public is_leader(): Promise<boolean> {
     return this.leader()
-      .then(kv => {
-        if(kv.create_revision !== this.leaderRevision.toString() || kv.key.toString() !== this.leaderKey) {
-          throw new EtcdElectionNotLeaderError();
-        }
-
-        return kv;
-      })
+      .then(kv => kv.create_revision === this.leaderRevision.toString() && kv.key.toString() === this.leaderKey);
   }
 
   /**

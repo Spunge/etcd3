@@ -73,11 +73,14 @@ describe('Election', () => {
     await expect(get_leader(election1)).to.eventually.equal('1')
   });
 
-  it('Supports if_leading promise chaining', async () => {
+  it('Reports leader state by quering etcd', async () => {
     await election0.campaign('0');
     await election1.campaign('1');
 
-    await expect(election0.if_leading()).to.not.be.rejected;
-    await expect(election1.if_leading()).to.be.rejected;
+    const is_leader0 = await election0.is_leader();
+    const is_leader1 = await election1.is_leader();
+
+    await expect(is_leader0).to.equal(true);
+    await expect(is_leader1).to.equal(false);
   })
 })
