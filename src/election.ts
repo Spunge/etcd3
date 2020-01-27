@@ -124,7 +124,7 @@ export class Election {
       })
   }
 
-  public is_leader(): Promise<boolean> {
+  public isLeader(): Promise<boolean> {
     return this.leader()
       .then(kv => kv.create_revision === this.leaderRevision.toString() && kv.key.toString() === this.leaderKey);
   }

@@ -77,10 +77,10 @@ describe('Election', () => {
     await election0.campaign('0');
     await election1.campaign('1');
 
-    const is_leader0 = await election0.is_leader();
-    const is_leader1 = await election1.is_leader();
+    const isLeader0 = await election0.isLeader();
+    const isLeader1 = await election1.isLeader();
 
-    await expect(is_leader0).to.equal(true);
-    await expect(is_leader1).to.equal(false);
+    await expect(isLeader0).to.equal(true);
+    await expect(isLeader1).to.equal(false);
   })
 })
