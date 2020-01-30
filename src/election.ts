@@ -3,8 +3,9 @@ import { BigNumber } from 'bignumber.js';
 import { Lease } from './lease';
 
 import { IKeyValue } from './rpc';
+import { delay } from './util';
 import { Namespace } from './namespace';
-import { EtcdElectionNoLeaderError, EtcdElectionNotLeaderError } from './errors';
+import { EtcdError, EtcdElectionNoLeaderError, EtcdElectionNotLeaderError } from './errors';
 
 /**
  * Etcd3 based election
@@ -93,7 +94,6 @@ export class Election {
       return Promise.resolve();
     }
 
-
     return this.client.if(this.leaderKey, 'Create', '==', this.leaderRevision.toString())
       .then(this.client.delete().key(this.leaderKey))
       .commit()
@@ -124,9 +124,24 @@ export class Election {
       })
   }
 
-  public isLeader(): Promise<boolean> {
+  /**
+   * TODO - querying ETCD every time we need to know wether we are leading is not ideal,
+   * keep this state around, use the waitDeletes logic from GO etcd client & eventEmitter
+   *
+   * This function will keep retrying to get leader state to work around network hickups for the moment
+   */
+  public isLeader(retries: number = 10, wait_for_milis: number = 0): Promise<boolean> {
     return this.leader()
-      .then(kv => kv.create_revision === this.leaderRevision.toString() && kv.key.toString() === this.leaderKey);
+      .then(kv => kv.create_revision === this.leaderRevision.toString() && kv.key.toString() === this.leaderKey)
+      .catch(err => {
+        // Could be there's a network hickup
+        if(err instanceof EtcdError && err.message.indexOf('request timed out') && retries > 0) {
+          // Wait a bit on request time-out & retry a few times
+          return delay(wait_for_milis).then(() => this.isLeader(retries - 1, wait_for_milis + 200))
+        } else {
+          throw err;
+        }
+      })
   }
 
   /**
