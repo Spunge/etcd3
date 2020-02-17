@@ -25,14 +25,14 @@ describe('watch()', () => {
   /**
    * Checks that the watcher is getting updates for the given key.
    */
-  function expectWatching(watcher: Watcher, key: string): Promise<Watcher> {
-    return Promise.all([
+  async function expectWatching(watcher: Watcher, key: string) {
+    await Promise.all([
       client.put(key).value('updated!'),
       onceEvent(watcher, 'put').then((res: IKeyValue) => {
         expect(res.key.toString()).to.equal(key);
         expect(res.value.toString()).to.equal('updated!');
       }),
-    ]).then(() => watcher);
+    ]);
   }
 
   /**
@@ -133,18 +133,14 @@ describe('watch()', () => {
     });
 
     it('subscribes while the connection is still being established', async () => {
-      const watcher1 = client
-        .watch()
-        .key('foo1')
-        .create();
-      const watcher2 = client
-        .watch()
-        .key('bar')
-        .create();
-
       const watchers = await Promise.all([
-        watcher1.then(w => expectWatching(w, 'foo1')),
-        watcher2.then(w => expectWatching(w, 'bar')),
+        client.watch().key('foo1').create(),
+        client.watch().key('bar').create(),
+      ])
+
+      await Promise.all([
+        expectWatching(watchers[0], 'foo1'),
+        expectWatching(watchers[1], 'bar'),
       ]);
 
       expect(getWatchers()).to.deep.equal(watchers);
@@ -190,6 +186,7 @@ describe('watch()', () => {
         .watch()
         .key('foo1')
         .create();
+
       await expectWatching(watcher1, 'foo1');
       await watcher1.cancel();
 
@@ -197,6 +194,7 @@ describe('watch()', () => {
         .watch()
         .key('foo1')
         .create();
+
       await expectWatching(watcher2, 'foo1');
       await watcher2.cancel();
     });
