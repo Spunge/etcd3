@@ -1,5 +1,5 @@
 {
-  "name": "etcd3",
+  "name": "@forest.host/etcd3",
   "version": "0.2.13",
   "description": "Node client for etcd3",
   "main": "lib/src/index.js",
@@ -17,7 +17,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mixer/etcd3.git"
+    "url": "git+https://github.com/spunge/etcd3.git"
   },
   "nyc": {
     "include": [
