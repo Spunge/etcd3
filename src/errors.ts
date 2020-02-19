@@ -125,7 +125,7 @@ export class EtcdLeaseInvalidError extends Error {
 /**
  * EtcdElectionNotLeader is thrown when current process is not the election leader
  */
-export class EtcdElectionNotLeaderError extends Error {}
+export class EtcdElectionNotCampaigningError extends Error {}
 
 /**
  * EtcdElectionNoLeader is thrown when the current election has no leader

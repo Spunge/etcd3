@@ -2,6 +2,7 @@
   "$schema": "http://json.schemastore.org/tslint",
   "extends": ["tslint:recommended", "tslint-config-prettier"],
   "rules": {
+    "comment-format": false,
     "no-console": false,
     "ordered-imports": false,
     "object-literal-sort-keys": false,

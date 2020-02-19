@@ -1,86 +1,125 @@
 
 import { BigNumber } from 'bignumber.js';
 import { Lease } from './lease';
+import { EventEmitter } from 'events';
 
-import { IKeyValue } from './rpc';
-import { delay } from './util';
+import { IKeyValue, IRangeResponse } from './rpc';
 import { Namespace } from './namespace';
-import { EtcdError, EtcdElectionNoLeaderError, EtcdElectionNotLeaderError } from './errors';
+import { EtcdLeaseInvalidError, EtcdElectionNoLeaderError, EtcdElectionNotCampaigningError } from './errors';
+
+const enum CampaignState {
+  Idle = 'resigned',
+  Leading = 'leading',
+  Following = 'following',
+}
 
 /**
  * Etcd3 based election
  * For most part a port of the GO implementation
  * https://github.com/etcd-io/etcd/blob/master/clientv3/concurrency/election.go
  */
-export class Election {
+export class Election extends EventEmitter {
   private static readonly prefix: string = 'election';
 
-  public leaderKey: string;
-  public leaderRevision: BigNumber;
+  public lease: Lease;
+
+  public campaignKey: string;
+  public campaignRevision: BigNumber;
+  public campaignState: CampaignState;
 
   private readonly keyPrefix: string;
   private readonly client: Namespace;
-  private lease: Lease;
+  private timeout: number;
 
   constructor(client: Namespace, prefix: string, timeout: number | undefined = 5) {
+    super();
+
     this.keyPrefix = prefix;
     this.client = client;
-    this.lease = client.lease(timeout);
+    this.timeout = timeout;
+    this.campaignState = CampaignState.Idle;
+    this.lease = client.lease(this.timeout);
+
+    // It's possible to loose a lease due to network, wonky etcd server, etc...
+    this.lease.on('lost', () => {
+      this.setCampaignState(CampaignState.Idle);
+    })
   }
 
   /**
    * Campaign in current election to be leader
    */
-  public campaign(value: string) {
+  public async campaign(value: string) {
     // Get the leaseID specifically to append it to key
-    return this.lease.grant()
-      .then(leaseId => {
-        const key = this.getKey(leaseId)
+    const leaseId = await this.lease.grant();
+    const key = this.getKey(leaseId)
 
-        // Create comparing query
-        return this.client.if(key, 'Create', '==', 0)
-          .then(this.client.put(key).value(value).lease(leaseId))
-          .else(this.client.get(key))
-          .commit()
+    // Create comparing query
+    const res = await this.client.if(key, 'Create', '==', 0)
+      .then(this.client.put(key).value(value).lease(leaseId))
+      .else(this.client.get(key))
+      .commit();
 
-          .then(res => {
-            this.leaderKey = key;
-            this.leaderRevision = new BigNumber(res.header.revision);
+    this.campaignKey = key;
+    this.campaignRevision = new BigNumber(res.header.revision);
 
-            if( ! res.succeeded) {
-              const kv = res.responses[0].response_range.kvs[0];
-              this.leaderRevision = new BigNumber(kv.create_revision);
+    // Succeeded means that we got the 0 revision write
+    if( ! res.succeeded) {
+      // There has already been written to our key, which is weird
+      const kv = res.responses[0].response_range.kvs[0];
+      this.campaignRevision = new BigNumber(kv.create_revision);
 
-              if(kv.value.toString() !== value) {
-                return this.proclaim(value)
-                  .catch(err => {
-                    return this.resign()
-                      .then(() => { throw err });
-                  });
-              }
-            }
+      // Could be campaign was called with another value?
+      try {
+        return this.proclaim(value);
+      } catch(err) {
+        return this.resign()
+          .then(() => { throw err });
+      };
+    }
 
-            return;
-          })
-      })
+    const prev_rev = this.campaignRevision.minus(1);
+
+    // The oldest revision is leading
+    if((await this.get_older_kvs(prev_rev)).kvs.length === 0) {
+      this.setCampaignState(CampaignState.Leading);
+    } else {
+      // When there's older revisions, follow until we are the oldest
+      this.setCampaignState(CampaignState.Following);
+
+      // Wait for old key to be deleted, which would mean we are now leading
+      const watcher = await this.client.watch()
+        .key(key)
+        .startRevision(prev_rev.toString())
+        .create();
+
+      // We don't want to be leader anymore after we resign
+      // Resigned will be triggered when we stop campaigning: when we resign manually, or when our lease is lost
+      this.on('resigned', () => watcher.cancel());
+
+      // When previous key is deleted, we will lead the pack
+      watcher
+        .on('delete', () => this.setCampaignState(CampaignState.Leading))
+        .on('error', err => { throw err })
+    }
   }
 
   /**
    * Change leaders value without starting new election
    */
   public proclaim(value: string) {
-    if( ! this.leaderKey) {
-      throw new EtcdElectionNotLeaderError();
+    if( ! this.campaignKey) {
+      throw new EtcdElectionNotCampaigningError();
     }
 
-    return this.client.if(this.leaderKey, 'Create', '==', this.leaderRevision.toString())
-      .then(this.client.put(this.leaderKey).value(value).lease(this.lease.grant()))
+    return this.client.if(this.campaignKey, 'Create', '==', this.campaignRevision.toString())
+      .then(this.client.put(this.campaignKey).value(value).lease(this.lease.grant()))
       .commit()
 
       .then(res => {
         if( ! res.succeeded) {
-          this.leaderKey = "";
-          throw new EtcdElectionNotLeaderError();
+          this.setCampaignState(CampaignState.Idle);
+          throw new EtcdElectionNotCampaigningError();
         }
       })
   }
@@ -88,75 +127,82 @@ export class Election {
   /**
    * Stop being leader
    */
-  public resign() {
+  public async resign() {
     // Seems we're not leading anyway
-    if( ! this.leaderKey) {
+    if( ! this.campaignKey) {
       return Promise.resolve();
     }
 
-    return this.client.if(this.leaderKey, 'Create', '==', this.leaderRevision.toString())
-      .then(this.client.delete().key(this.leaderKey))
-      .commit()
+    await this.client.if(this.campaignKey, 'Create', '==', this.campaignRevision.toString())
+      .then(this.client.delete().key(this.campaignKey))
+      .commit();
 
-      .then(() => {
-        this.leaderKey = "";
-        // Delete lease so we can create a new one
-        delete this.lease;
-      })
+    this.setCampaignState(CampaignState.Idle);
+
+    // Delete lease so we can create a new one
+    try {
+      await this.lease.revoke();
+    } catch(err) {
+      if( ! (err instanceof EtcdLeaseInvalidError)) {
+        throw err
+      }
+    }
   }
 
   /**
    * Get the current leader
    */
-  public leader(): Promise<IKeyValue> {
-    return this.client
+  public async leader(): Promise<IKeyValue> {
+    const res = await this.client
       .getAll()
       .prefix(this.getPrefix())
       .sort("Create", "Ascend")
       .exec()
 
-      .then(res => {
-        if(res.kvs.length === 0) {
-          throw new EtcdElectionNoLeaderError();
-        }
+    if(res.kvs.length === 0) {
+      throw new EtcdElectionNoLeaderError();
+    }
 
-        return res.kvs[0];
-      })
+    return Promise.resolve(res.kvs[0]);
+  }
+
+  public isLeading(): boolean {
+    return this.campaignState === CampaignState.Leading;
   }
 
   /**
-   * TODO - querying ETCD every time we need to know wether we are leading is not ideal,
-   * keep this state around, use the waitDeletes logic from GO etcd client & eventEmitter
-   *
-   * This function will keep retrying to get leader state to work around network hickups for the moment
+   * Set campaignState which we use to keep track of our current role in the group
    */
-  public isLeader(retries: number = 10, wait_for_milis: number = 0): Promise<boolean> {
-    return this.leader()
-      .then(kv => kv.create_revision === this.leaderRevision.toString() && kv.key.toString() === this.leaderKey)
-      .catch(err => {
-        // Could be there's a network hickup
-        if(err instanceof EtcdError && err.message.indexOf('request timed out') && retries > 0) {
-          // Wait a bit on request time-out & retry a few times
-          return delay(wait_for_milis).then(() => this.isLeader(retries - 1, wait_for_milis + 200))
-        } else {
-          throw err;
-        }
-      })
+  private setCampaignState(state: CampaignState, ...args: any[]) {
+    // When we return to idle, it's because we resigned or lost lease, remove key in that case
+    if(state === CampaignState.Idle) {
+      this.campaignKey = "";
+    }
+
+    this.campaignState = state;
+    this.emit(state, ...args);
+  }
+
+  private get_older_kvs(maxCreateRevision: BigNumber): Promise<IRangeResponse> {
+    return this.client.getAll()
+      .prefix(this.getPrefix())
+      .maxCreateRevision(maxCreateRevision.toString())
+      .sort("Create", "Ascend")
+      .exec();
   }
 
   /**
-   * Kill this elections lease (used in tests to simulate leader being killed)
+   * Get key of etcd object based on lease id
    */
-  public kill() {
-    return this.lease.revoke();
-  }
-
   private getKey(leaseId: string): string {
     // Format as hexadecimal
     const leaseString = new BigNumber(leaseId).toString(16);
     return `${this.getPrefix()}${leaseString}`;
   }
 
+  /**
+   * Get prefix used for all election keys
+   */
   private getPrefix(): string {
     return `${Election.prefix}/${this.keyPrefix}/`;
   }
