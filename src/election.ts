@@ -170,6 +170,14 @@ export class Election extends EventEmitter {
     return this.campaignState === CampaignState.Leading;
   }
 
+  public isFollowing(): boolean {
+    return this.campaignState === CampaignState.Following;
+  }
+
+  public isIdle(): boolean {
+    return this.campaignState === CampaignState.Idle;
+  }
+
   /**
    * Set campaignState which we use to keep track of our current role in the group
    */

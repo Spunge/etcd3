@@ -47,9 +47,9 @@
   "author": "Connor Peet <connor@peet.io>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/mixer/etcd3/issues"
+    "url": "https://github.com/spunge/etcd3/issues"
   },
-  "homepage": "https://github.com/mixer/etcd3#readme",
+  "homepage": "https://github.com/spunge/etcd3#readme",
   "devDependencies": {
     "@types/chai": "^4.2.7",
     "@types/chai-as-promised": "^7.1.2",
