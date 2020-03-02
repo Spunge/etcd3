@@ -81,7 +81,7 @@ export class Election extends EventEmitter {
     const prev_rev = this.campaignRevision.minus(1);
 
     // The oldest revision is leading
-    let previous = await this.get_older_kvs(prev_rev);
+    const previous = await this.get_older_kvs(prev_rev);
     if(previous.kvs.length === 0) {
       this.setCampaignState(CampaignState.Leading);
     } else {

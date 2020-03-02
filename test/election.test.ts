@@ -21,7 +21,7 @@ function getWatchers(client: Etcd3): Watcher[] {
  * Either election is already at state || it will get to state
  */
 function wait_for_state(election: Election, state: CampaignState): Promise<any> {
-  if(election.campaignState == state) {
+  if(election.campaignState === state) {
     return Promise.resolve();
   } else {
     return new Promise(resolve => {
