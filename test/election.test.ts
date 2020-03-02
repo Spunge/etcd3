@@ -2,8 +2,9 @@
 import { expect } from 'chai';
 
 import { Etcd3 } from '../src';
-import { Election } from '../src/election';
+import { Election, CampaignState } from '../src/election';
 import { Watcher } from '../src/watch';
+import { EtcdError } from '../src/errors';
 import { createTestClientAndKeys, tearDownTestClient } from './util';
 
 async function getLeader(election: Election): Promise<string> {
@@ -13,6 +14,20 @@ async function getLeader(election: Election): Promise<string> {
 
 function getWatchers(client: Etcd3): Watcher[] {
   return (client as any).watchManager.watchers;
+}
+
+
+/**
+ * Either election is already at state || it will get to state
+ */
+function wait_for_state(election: Election, state: CampaignState): Promise<any> {
+  if(election.campaignState == state) {
+    return Promise.resolve();
+  } else {
+    return new Promise(resolve => {
+      election.on(state, resolve);
+    });
+  }
 }
 
 describe('election', () => {
@@ -43,6 +58,7 @@ describe('election', () => {
 
       expect(election0.isLeading()).to.be.true;
       expect(election1.isLeading()).to.be.false;
+      expect(await getLeader(election0)).to.equal('0')
     });
 
     it('Does not start a watcher for old revisions when election is leading', async () => {
@@ -56,6 +72,7 @@ describe('election', () => {
       await election0.campaign('0');
       await election1.campaign('1');
      
+      expect(await getLeader(election0)).to.equal('0')
       expect(election1.isLeading()).to.be.false;
       expect(getWatchers(client)).to.have.length(1);
     });
@@ -65,6 +82,10 @@ describe('election', () => {
       await election1.campaign('1');
       await election0.resign();
 
+      await wait_for_state(election1, CampaignState.Leading);
+
+      expect(election0.isLeading()).to.be.false;
+      expect(election1.isLeading()).to.be.true;
       expect(await getLeader(election0)).to.equal('1')
       expect(await getLeader(election1)).to.equal('1')
     });
@@ -72,9 +93,12 @@ describe('election', () => {
     it('Takes over leadership when leader fails', async () => {
       await election0.campaign('0');
       await election1.campaign('1');
-      // Kill lease of 0
-      await election0.lease.revoke();
+      // Cast to any to access private methods (what typescript?) & kill lease of 0
+      (election0.lease as any).emitLoss(new EtcdError('forced fail'));
+      await wait_for_state(election1, CampaignState.Leading);
 
+      expect(election0.isLeading()).to.be.false;
+      expect(election1.isLeading()).to.be.true;
       expect(await getLeader(election1)).to.equal('1')
     });
 
@@ -109,6 +133,9 @@ describe('election', () => {
 
       await election0.proclaim('2');
       expect(await getLeader(election0)).to.equal('2')
+
+      expect(election0.isLeading()).to.be.true;
+      expect(election1.isLeading()).to.be.false;
     });
   })
 

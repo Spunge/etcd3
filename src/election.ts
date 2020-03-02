@@ -7,7 +7,7 @@ import { IKeyValue, IRangeResponse } from './rpc';
 import { Namespace } from './namespace';
 import { EtcdLeaseInvalidError, EtcdElectionNoLeaderError, EtcdElectionNotCampaigningError } from './errors';
 
-const enum CampaignState {
+export const enum CampaignState {
   Idle = 'resigned',
   Leading = 'leading',
   Following = 'following',
@@ -81,7 +81,8 @@ export class Election extends EventEmitter {
     const prev_rev = this.campaignRevision.minus(1);
 
     // The oldest revision is leading
-    if((await this.get_older_kvs(prev_rev)).kvs.length === 0) {
+    let previous = await this.get_older_kvs(prev_rev);
+    if(previous.kvs.length === 0) {
       this.setCampaignState(CampaignState.Leading);
     } else {
       // When there's older revisions, follow until we are the oldest
@@ -89,7 +90,7 @@ export class Election extends EventEmitter {
 
       // Wait for old key to be deleted, which would mean we are now leading
       const watcher = await this.client.watch()
-        .key(key)
+        .prefix(this.getPrefix())
         .startRevision(prev_rev.toString())
         .create();
 
@@ -99,7 +100,10 @@ export class Election extends EventEmitter {
 
       // When previous key is deleted, we will lead the pack
       watcher
-        .on('delete', () => this.setCampaignState(CampaignState.Leading))
+        .on('delete', async () => {
+          await watcher.cancel();
+          return this.setCampaignState(CampaignState.Leading);
+        })
         .on('error', err => { throw err })
     }
   }
