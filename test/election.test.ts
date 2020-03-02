@@ -16,20 +16,6 @@ function getWatchers(client: Etcd3): Watcher[] {
   return (client as any).watchManager.watchers;
 }
 
-
-/**
- * Either election is already at state || it will get to state
- */
-function wait_for_state(election: Election, state: CampaignState): Promise<any> {
-  if(election.campaignState === state) {
-    return Promise.resolve();
-  } else {
-    return new Promise(resolve => {
-      election.on(state, resolve);
-    });
-  }
-}
-
 describe('election', () => {
   let client: Etcd3;
   let election0: Election;
@@ -82,7 +68,7 @@ describe('election', () => {
       await election1.campaign('1');
       await election0.resign();
 
-      await wait_for_state(election1, CampaignState.Leading);
+      await election1.wait_for_state(CampaignState.Leading);
 
       expect(election0.isLeading()).to.be.false;
       expect(election1.isLeading()).to.be.true;
@@ -95,7 +81,7 @@ describe('election', () => {
       await election1.campaign('1');
       // Cast to any to access private methods (what typescript?) & kill lease of 0
       (election0.lease as any).emitLoss(new EtcdError('forced fail'));
-      await wait_for_state(election1, CampaignState.Leading);
+      await election1.wait_for_state(CampaignState.Leading);
 
       expect(election0.isLeading()).to.be.false;
       expect(election1.isLeading()).to.be.true;

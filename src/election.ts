@@ -182,6 +182,16 @@ export class Election extends EventEmitter {
     return this.campaignState === CampaignState.Idle;
   }
 
+  public waitForCampaignState(state: CampaignState): Promise<any> {
+    if(this.campaignState === state) {
+      return Promise.resolve();
+    } else {
+      return new Promise(resolve => {
+        this.on(state, resolve);
+      });
+    }
+  }
+
   /**
    * Set campaignState which we use to keep track of our current role in the group
    */
