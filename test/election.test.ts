@@ -68,7 +68,7 @@ describe('election', () => {
       await election1.campaign('1');
       await election0.resign();
 
-      await election1.wait_for_state(CampaignState.Leading);
+      await election1.waitForCampaignState(CampaignState.Leading);
 
       expect(election0.isLeading()).to.be.false;
       expect(election1.isLeading()).to.be.true;
@@ -81,7 +81,7 @@ describe('election', () => {
       await election1.campaign('1');
       // Cast to any to access private methods (what typescript?) & kill lease of 0
       (election0.lease as any).emitLoss(new EtcdError('forced fail'));
-      await election1.wait_for_state(CampaignState.Leading);
+      await election1.waitForCampaignState(CampaignState.Leading);
 
       expect(election0.isLeading()).to.be.false;
       expect(election1.isLeading()).to.be.true;
