@@ -38,11 +38,13 @@ export class Election extends EventEmitter {
     this.client = client;
     this.timeout = timeout;
     this.campaignState = CampaignState.Idle;
-    this.lease = client.lease(this.timeout);
+    this.createLease();
 
     // It's possible to loose a lease due to network, wonky etcd server, etc...
-    this.lease.on('lost', () => {
+    this.lease.on('lost', async () => {
+      await this.clearLease();
       this.setCampaignState(CampaignState.Idle);
+      this.createLease();
     })
   }
 
@@ -120,8 +122,9 @@ export class Election extends EventEmitter {
       .then(this.client.put(this.campaignKey).value(value).lease(this.lease.grant()))
       .commit()
 
-      .then(res => {
+      .then(async res => {
         if( ! res.succeeded) {
+          await this.clearLease();
           this.setCampaignState(CampaignState.Idle);
           throw new EtcdElectionNotCampaigningError();
         }
@@ -141,16 +144,10 @@ export class Election extends EventEmitter {
       .then(this.client.delete().key(this.campaignKey))
       .commit();
 
+    await this.clearLease();
     this.setCampaignState(CampaignState.Idle);
-
-    // Delete lease so we can create a new one
-    try {
-      await this.lease.revoke();
-    } catch(err) {
-      if( ! (err instanceof EtcdLeaseInvalidError)) {
-        throw err
-      }
-    }
+    // Create new lease in case we want to campaign again
+    this.createLease();
   }
 
   /**
@@ -192,15 +189,28 @@ export class Election extends EventEmitter {
     }
   }
 
+  private createLease() {
+    this.lease = this.client.lease(this.timeout);
+  }
+
+  private async clearLease() {
+    // Unset campaignkey as that will be generated based on lease_id
+    this.campaignKey = "";
+
+    // Delete lease so we can create a new one
+    try {
+      await this.lease.revoke();
+    } catch(err) {
+      if( ! (err instanceof EtcdLeaseInvalidError)) {
+        throw err
+      }
+    }
+  }
+
   /**
    * Set campaignState which we use to keep track of our current role in the group
    */
   private setCampaignState(state: CampaignState, ...args: any[]) {
-    // When we return to idle, it's because we resigned or lost lease, remove key in that case
-    if(state === CampaignState.Idle) {
-      this.campaignKey = "";
-    }
-
     this.campaignState = state;
     this.emit(state, ...args);
   }
