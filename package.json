@@ -1,6 +1,6 @@
 {
   "name": "@forest.host/etcd3",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "description": "Node client for etcd3",
   "main": "lib/src/index.js",
   "typings": "lib/src/index.d.ts",
