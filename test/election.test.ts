@@ -49,7 +49,7 @@ describe('election', () => {
 
     it('Does not start a watcher for old revisions when election is leading', async () => {
       await election0.campaign('0');
-     
+
       expect(election0.isLeading()).to.be.true;
       expect(getWatchers(client)).to.have.length(0);
     });
@@ -57,7 +57,7 @@ describe('election', () => {
     it('Starts watching old revisions when they exist', async () => {
       await election0.campaign('0');
       await election1.campaign('1');
-     
+
       expect(await getLeader(election0)).to.equal('0')
       expect(election1.isLeading()).to.be.false;
       expect(getWatchers(client)).to.have.length(1);
@@ -107,6 +107,31 @@ describe('election', () => {
         expect(election1.isLeading()).to.be.false;
         expect(getWatchers(client)).to.have.length(1);
       });
+    });
+
+    describe('Recampaigning on resign', () => {
+      it('Creates new lease', async () => {
+        await election0.campaign('0');
+        await election1.campaign('1');
+
+        const wait_for_recampaign = new Promise(resolve => {
+          election0.once('resigned', async () => {
+            await election0.campaign('0');
+            resolve();
+          });
+        });
+
+        expect(election0.isLeading()).to.be.true;
+        expect(election1.isLeading()).to.be.false;
+
+        await Promise.all([wait_for_recampaign, election0.resign()]);
+
+        // As election0 is now re-campaigning, election1 should be leading after watcher triggers
+        await election1.waitForCampaignState(CampaignState.Leading);
+
+        expect(election0.isIdle()).to.be.false;
+        expect(election1.isLeading()).to.be.true;
+      })
     })
   })
 

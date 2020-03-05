@@ -43,8 +43,8 @@ export class Election extends EventEmitter {
     // It's possible to loose a lease due to network, wonky etcd server, etc...
     this.lease.on('lost', async () => {
       await this.clearLease();
-      this.setCampaignState(CampaignState.Idle);
       this.createLease();
+      this.setCampaignState(CampaignState.Idle);
     })
   }
 
@@ -144,10 +144,10 @@ export class Election extends EventEmitter {
       .then(this.client.delete().key(this.campaignKey))
       .commit();
 
+    // Clear lease & Create new lease in case we want to campaign again
     await this.clearLease();
-    this.setCampaignState(CampaignState.Idle);
-    // Create new lease in case we want to campaign again
     this.createLease();
+    this.setCampaignState(CampaignState.Idle);
   }
 
   /**
