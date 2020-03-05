@@ -7,7 +7,7 @@ import { IKeyValue, IRangeResponse } from './rpc';
 import { Namespace } from './namespace';
 import { EtcdLeaseInvalidError, EtcdElectionNoLeaderError, EtcdElectionNotCampaigningError } from './errors';
 
-export const enum CampaignState {
+export enum CampaignState {
   Idle = 'resigned',
   Leading = 'leading',
   Following = 'following',
