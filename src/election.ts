@@ -82,7 +82,7 @@ export class Election extends EventEmitter {
 
     const prev_rev = this.campaignRevision.minus(1);
 
-    // The oldest revision is leading
+    // The oldest revision is leading, so get older kvs, ordered from young => old
     const previous = await this.get_older_kvs(prev_rev);
     if(previous.kvs.length === 0) {
       this.setCampaignState(CampaignState.Leading);
@@ -93,6 +93,8 @@ export class Election extends EventEmitter {
       // Wait for old key to be deleted, which would mean we are now leading
       const watcher = await this.client.watch()
         .prefix(this.getPrefix())
+        // This is not create revision, but mod_revision, this means we can not watch for kvs with 
+        // create revision 1 before our create revision.
         .startRevision(prev_rev.toString())
         .create();
 
@@ -102,9 +104,13 @@ export class Election extends EventEmitter {
 
       // When previous key is deleted, we will lead the pack
       watcher
-        .on('delete', async () => {
-          await watcher.cancel();
-          return this.setCampaignState(CampaignState.Leading);
+        .on('delete', async kv => {
+          // We can't compare create revision of watcher passed kv, as that will always be 0 somehow,
+          // As keys have lease ID baked in, compare these with the youngest kv preceding our own
+          if(kv.key.toString() === previous.kvs[0].key.toString()) {
+            await watcher.cancel();
+            return this.setCampaignState(CampaignState.Leading);
+          }
         })
         .on('error', err => { throw err })
     }
@@ -219,7 +225,7 @@ export class Election extends EventEmitter {
     return this.client.getAll()
       .prefix(this.getPrefix())
       .maxCreateRevision(maxCreateRevision.toString())
-      .sort("Create", "Ascend")
+      .sort("Create", "Descend")
       .exec();
   }
 

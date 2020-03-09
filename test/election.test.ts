@@ -20,6 +20,7 @@ describe('election', () => {
   let client: Etcd3;
   let election0: Election;
   let election1: Election;
+  let election2: Election;
 
   before(async () => {
     client = await createTestClientAndKeys();
@@ -31,10 +32,12 @@ describe('election', () => {
   beforeEach(async () => {
     election0 = client.election('test', 1);
     election1 = client.election('test', 1);
+    election2 = client.election('test', 1)
   });
   afterEach(async () => {
     await election0.resign();
     await election1.resign();
+    await election2.resign();
   });
 
   describe('campaign()', () => {
@@ -87,6 +90,30 @@ describe('election', () => {
       expect(election1.isLeading()).to.be.true;
       expect(await getLeader(election1)).to.equal('1')
     });
+
+    it('Only takes over leadership on election with oldest lease', async () => {
+      await election0.campaign('0');
+      await election1.campaign('1');
+      await election2.campaign('2');
+
+      expect(election0.isLeading()).to.be.true;
+      expect(election1.isLeading()).to.be.false;
+      expect(election2.isLeading()).to.be.false;
+
+      (election0.lease as any).emitLoss(new EtcdError('forced fail'));
+      await election1.waitForCampaignState(CampaignState.Leading);
+
+      expect(election0.isLeading()).to.be.false;
+      expect(election1.isLeading()).to.be.true;
+      expect(election2.isLeading()).to.be.false;
+
+      (election1.lease as any).emitLoss(new EtcdError('forced fail'));
+      await election2.waitForCampaignState(CampaignState.Leading);
+
+      expect(election0.isLeading()).to.be.false;
+      expect(election1.isLeading()).to.be.false;
+      expect(election2.isLeading()).to.be.true;
+    })
 
     describe('Multiple subsequent calls', () => {
       it('Proclaims when with the same lease', async () => {
